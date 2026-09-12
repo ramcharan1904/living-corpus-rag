@@ -3,6 +3,10 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+REPO_ROOT = Path(__file__).resolve().parent
+
+
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
@@ -24,10 +28,18 @@ class Settings(BaseSettings):
     corpus_path_mid: Path = Path("../pyd-v2mid")
     corpus_path_late: Path = Path("../pyd-v2late")
 
+    # Data lake root for the medallion pipeline (relative to repo root).
+    bronze_path: Path = Path("bronze")
+
     # API
     api_host: str = "0.0.0.0"
     api_port: int = 8000
-
+     
+    excluded_top_level: set[str] = {
+        "contributing.md",
+        "pydantic_people.md",
+        "help_with_pydantic.md",
+    }
     @property
     def postgres_dsn(self) -> str:
         return (

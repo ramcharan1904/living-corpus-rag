@@ -53,3 +53,9 @@ Thumbs.db
 
 # --- Project-local ---
 *.log
+
+# Data lake output (medallion pipeline artifacts, not source).
+# Anchored to repo root so ingestion/{bronze,silver,gold}/ (code) is unaffected.
+/bronze/
+/silver/
+/gold/
