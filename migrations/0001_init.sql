@@ -34,7 +34,8 @@ CREATE TABLE chunks (
     doc_id             BIGINT NOT NULL REFERENCES documents(doc_id) ON DELETE CASCADE,
     heading_path       TEXT NOT NULL,        -- 'Fields > Field inspection'
     chunk_index        INT NOT NULL,         -- order within the document
-    text               TEXT NOT NULL,
+    raw_text           TEXT NOT NULL,
+    embed_text         TEXT NOT NULL,
     content_hash       TEXT NOT NULL,
     valid_from_rank    INT NOT NULL REFERENCES versions(version_rank),
     valid_to_rank      INT REFERENCES versions(version_rank),  -- NULL = still current
