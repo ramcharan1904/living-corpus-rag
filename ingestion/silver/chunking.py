@@ -5,6 +5,7 @@ line number — the markdown is never rebuilt from tokens, because
 raw_text is hashed and must be byte-identical to the source.
 """
 
+import re
 from dataclasses import dataclass
 
 import tiktoken
@@ -16,6 +17,11 @@ MIN_TRAILING_PART_TOKENS = 100
 
 _enc = tiktoken.get_encoding("cl100k_base")
 _md = MarkdownIt()
+
+# Authors embed anchor tags in headings, e.g.
+#   ### Customizing validation <a name="customizing-validation"></a>
+# Pure markup noise: it bloats the citation and the identity key alike.
+_HTML_TAG = re.compile(r"<[^>]+>")
 
 
 @dataclass
@@ -49,6 +55,15 @@ def _frontmatter_end(lines: list[str]) -> int:
     return 0
 
 
+def _is_heading_only(text: str) -> bool:
+    """True if the chunk is a bare heading with no body.
+
+    Parent headings whose content lives entirely in child sections produce
+    these. They can never answer a question, so they don't belong in the index.
+    """
+    return not [ln for ln in text.splitlines()[1:] if ln.strip()]
+
+
 def _heading_positions(tokens) -> list[tuple[int, int, str]]:
     """Return (start_line, level, title) for every h1/h2/h3."""
     positions = []
@@ -71,7 +86,13 @@ def _heading_positions(tokens) -> list[tuple[int, int, str]]:
 
 
 def _build_path(stack: list[tuple[int, str]], level: int, title: str, doc_title: str) -> str:
-    """Update the heading stack in place and return the full path."""
+    """Update the heading stack in place and return the full path.
+
+    Inline markdown (backticks) is kept: it signals that a heading names a
+    code identifier. Raw HTML tags are stripped — they carry no such signal.
+    """
+    title = _HTML_TAG.sub("", title).strip()
+
     while stack and stack[-1][0] >= level:
         stack.pop()
 
@@ -84,8 +105,8 @@ def _protected_ranges(tokens) -> list[tuple[int, int]]:
     """Line ranges that must never be split through.
 
     `fence` is a ``` block. `code_block` is a four-space-indented block,
-    which is how code appears inside MkDocs admonitions (!!! note, ??? api).
-    Hand-tracking backticks would miss every code_block.
+    which is how code appears inside MkDocs admonitions (!!! note, ??? api)
+    and inside list items. Hand-tracking backticks would miss every code_block.
     """
     return [
         tuple(t.map)
@@ -124,6 +145,9 @@ def _split_oversized(raw: str, path: str) -> list[tuple[str, str]]:
     Parts are labelled 'part 1', 'part 2' — never 'part 1 of 3', because a
     section that is 2 parts in one version and 3 in another must still match
     part-for-part across versions.
+
+    A single block larger than MAX_TOKENS (a long code example, or a tight
+    bullet list with no blank lines) cannot be split and stays oversized.
     """
     if _count(raw) <= MAX_TOKENS:
         return [(path, raw)]
@@ -143,8 +167,8 @@ def _split_oversized(raw: str, path: str) -> list[tuple[str, str]]:
     if current.strip():
         parts.append(current)
 
-    # A small trailing remainder is rarely useful on its own — usually
-    # anchor comments or a stray line. Fold it back into the previous part.
+    # A small trailing remainder is rarely useful alone — usually anchor
+    # comments or a stray line. Fold it back into the previous part.
     if len(parts) > 1 and _count(parts[-1]) < MIN_TRAILING_PART_TOKENS:
         parts[-2] += parts[-1]
         parts.pop()
@@ -179,7 +203,7 @@ def chunk_markdown(text: str, doc_title: str) -> list[Chunk]:
         path = _build_path(stack, level, title, doc_title)
         raw = "".join(lines[start:end])
 
-        if raw.strip():
+        if raw.strip() and not _is_heading_only(raw):
             sections.append((path, raw))
 
     chunks: list[Chunk] = []
@@ -199,7 +223,6 @@ def chunk_markdown(text: str, doc_title: str) -> list[Chunk]:
 
     return chunks
 
-
 if __name__ == "__main__":
     import sys
     from pathlib import Path
@@ -212,14 +235,7 @@ if __name__ == "__main__":
         flag = "  <<< OVER" if c.token_count > MAX_TOKENS else ""
         print(f"{c.token_count:5d}  {c.heading_path}{flag}")
 
-    print("\n--- small chunks ---")
-    for c in chunks:
-        if c.token_count < 100:
-            print(f"{c.token_count}  {c.heading_path}")
-            print(repr(c.raw_text[:200]))
-            print()
-
-    print("--- unbalanced fences ---")
-    for c in chunks:
-        if c.raw_text.count("```") % 2 != 0:
-            print("UNBALANCED:", c.heading_path)
+    unbalanced = [c for c in chunks if c.raw_text.count("```") % 2]
+    print(f"\n{len(chunks)} chunks, "
+          f"{sum(c.token_count > MAX_TOKENS for c in chunks)} oversized, "
+          f"{len(unbalanced)} unbalanced")

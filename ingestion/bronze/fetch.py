@@ -51,10 +51,16 @@ def sha256_bytes(data: bytes) -> str:
 
 
 def get_version_row(conn: psycopg.Connection, version_tag: str) -> tuple[int, Path]:
-    row = conn.execute(
-        "SELECT version_rank, corpus_path FROM versions WHERE version_tag = %s",
-        (version_tag,),
-    ).fetchone()
+    # Wrapped so this can never leave an implicit transaction open on the
+    # connection - a bare execute() outside a `with conn.transaction():`
+    # block starts one that lingers, turning every later per-file
+    # `with conn.transaction():` in the caller's loop into a nested
+    # savepoint instead of an independently-committing transaction.
+    with conn.transaction():
+        row = conn.execute(
+            "SELECT version_rank, corpus_path FROM versions WHERE version_tag = %s",
+            (version_tag,),
+        ).fetchone()
     if row is None:
         raise SystemExit(f"no row in versions for version_tag={version_tag!r}")
     version_rank, corpus_path = row
