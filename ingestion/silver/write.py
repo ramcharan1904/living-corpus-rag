@@ -8,9 +8,10 @@ against the currently open row (valid_to_rank IS NULL) for the same
     no open row              -> new:       insert, valid_from_rank = this rank
     open row, same hash      -> unchanged: leave the open interval as is
     open row, different hash -> changed:   close the old row at this rank - 1, insert new
-    open row not seen again  -> retired:   close it at this rank - 1 (checked
-                                            once per document, after all its
-                                            chunks are processed)
+    open row not seen again  -> retired:   close it at this rank - 1
+
+Documents absent from a version are never visited by the per-document
+loop, so their chunks are retired in a separate pass afterwards.
 
 Usage:
     python -m ingestion.silver.write v2.4.0
@@ -138,6 +139,35 @@ def process_document(conn: psycopg.Connection, doc_id: int, rel_path: str, raw_p
     return counts
 
 
+def _retire_missing_documents(conn: psycopg.Connection, version_rank: int) -> int:
+    """Close chunks belonging to documents absent from this version.
+
+    The per-document loop only visits documents present at this rank, so a
+    deleted file is never examined and its chunks stay open. Without this,
+    a query filtered to this version would return content from a file that
+    no longer exists.
+
+    The valid_from_rank < rank guard protects rows inserted during this same
+    run, which would otherwise be closed at valid_from_rank - 1.
+    """
+    with conn.transaction():
+        cur = conn.execute(
+            """
+            UPDATE chunks c
+            SET valid_to_rank = %(rank)s - 1
+            WHERE c.valid_to_rank IS NULL
+              AND c.valid_from_rank < %(rank)s
+              AND NOT EXISTS (
+                  SELECT 1 FROM doc_versions dv
+                  WHERE dv.doc_id = c.doc_id
+                    AND dv.version_rank = %(rank)s
+              )
+            """,
+            {"rank": version_rank},
+        )
+        return cur.rowcount
+
+
 def _start_run(conn: psycopg.Connection, version_rank: int) -> int:
     with conn.transaction():
         row = conn.execute(
@@ -191,6 +221,11 @@ def write_version(conn: psycopg.Connection, version_tag: str) -> dict[str, int]:
         # Written after every document, not just at the end, so ingest_runs
         # reflects real progress even if a later document fails.
         _update_run(conn, run_id, totals)
+
+    # Documents absent from this version are never visited by the loop above,
+    # so their chunks must be retired in a separate pass.
+    totals["retired"] += _retire_missing_documents(conn, version_rank)
+    _update_run(conn, run_id, totals)
 
     _finish_run(conn, run_id)
 
