@@ -1,0 +1,500 @@
+# Golden set — Living Corpus RAG
+#
+# Versions: v2.4.0 (rank 1), v2.8.2 (rank 2), v2.13.5 (rank 3)
+# Every answer is checked against docs/ at that tag, not against the changelog.
+#
+# Conventions
+#   answers.all       -> same answer at every version; the harness expands it
+#   "Not covered."    -> the docs at that version are silent. Grade against the
+#                        docs, not against what Pydantic did at runtime.
+#   sources           -> heading path where the answer lives (retrieval check)
+#
+# Distribution (deliberately oversampled toward change; real traffic is
+# mostly stable questions):
+#   version_sensitive 11 | new_feature 9 | removed 4 | version_stable 16  = 40
+# "removed" is supply-limited: only four genuine doc removals exist in the window.
+
+questions:
+
+# ─────────────────────────────── version_sensitive ───────────────────────────
+
+- id: q001
+  question: How do I configure a model to accept field names as well as aliases?
+  category: version_sensitive
+  answers:
+    v2.4.0: Set ConfigDict(populate_by_name=True).
+    v2.8.2: Set ConfigDict(populate_by_name=True).
+    v2.13.5: >
+      Set ConfigDict(validate_by_name=True). It defaults to False and pairs with
+      validate_by_alias; you cannot set both to False.
+  sources:
+    v2.4.0: "Fields > Field aliases"
+    v2.13.5: "Alias"
+  notes: populate_by_name appears zero times in v2.13.5 concepts/.
+
+- id: q002
+  question: Can model_fields be accessed on a model instance?
+  category: version_sensitive
+  answers:
+    v2.4.0: No dedicated guidance; examples use model_fields on the class.
+    v2.8.2: No dedicated guidance; examples use it freely, including on an instance.
+    v2.13.5: >
+      No. model_fields is class-only; access it from the class object, not the
+      instance. Deprecated on instances since v2.11.
+  sources:
+    v2.13.5: "Fields > Inspecting model fields"
+  notes: Answer moved from models.md examples to a dedicated fields.md section.
+
+- id: q007
+  question: >
+    In a generic Pydantic model, if I don't parametrize it, will a TypeVar's
+    default type be used for validation?
+  category: version_sensitive
+  answers:
+    v2.4.0: Not covered. This version's docs don't mention type variable defaults.
+    v2.8.2: >
+      Yes. A TypeVar with default= (Python 3.13+, or typing_extensions) is used
+      for both validation and serialization when the model isn't parametrized.
+    v2.13.5: >
+      Yes, with full support since v2.11, including the type parameter syntax.
+      Unparametrized type variables use their bound or constraints, then their
+      default, and fall back to Any otherwise.
+  sources:
+    v2.8.2: "Models > Generic models"
+    v2.13.5: "Models > Generic models > Validation of unparametrized type variables"
+  notes: v2.11 marker says "Full support", not "added". Partial support already at v2.8.2.
+
+- id: q009
+  question: When building a model dynamically with create_model, how do I define each field?
+  category: version_sensitive
+  answers:
+    v2.4.0: >
+      As keyword arguments, each a tuple of (type, default value), e.g.
+      foo=(str, ...) for required or bar=(int, 123).
+    v2.8.2: >
+      As keyword arguments in one of three forms: (type, default),
+      (type, Field(...)), or Annotated[type, Field(...)].
+    v2.13.5: >
+      As keyword arguments, either a single element (the type annotation) or a
+      two-tuple of (type, default or Field()). Since v2.11 the single element can
+      be any type; previously only an Annotated form was allowed.
+  sources:
+    all: "Models > Dynamic model creation"
+
+- id: q011
+  question: In create_model, can I pass just the type for a field, like name=str, without a tuple?
+  category: version_sensitive
+  answers:
+    v2.4.0: Not documented. Fields are defined only as (type, default value) tuples.
+    v2.8.2: >
+      Only as an Annotated form, e.g. Annotated[str, Field(...)]. A bare type
+      like name=str isn't a documented form.
+    v2.13.5: >
+      Yes. Since v2.11 a single element can be any type, so name=str works and
+      defines a required field.
+  sources:
+    all: "Models > Dynamic model creation"
+  notes: v2.13.5 answer rests on the marker text, not an example of a bare type.
+
+- id: q020
+  question: Can I exclude a field from model_dump only when it has a certain value, like zero?
+  category: version_sensitive
+  answers:
+    v2.4.0: >
+      Not with a per-field condition. Field(exclude=True) always excludes the
+      field; model_dump offers exclude_none, exclude_defaults, and exclude_unset.
+    v2.8.2: Same as v2.4.0.
+    v2.13.5: >
+      Yes. Use Field(exclude_if=...) with a callable, e.g.
+      Field(ge=0, exclude_if=lambda v: v == 0). Added in v2.12.
+  sources:
+    v2.13.5: "Fields > Excluding fields"
+
+- id: q021
+  question: How do I make model_dump use field aliases by default, without passing by_alias every time?
+  category: version_sensitive
+  answers:
+    v2.4.0: Not covered as a default. Pass by_alias=True on each model_dump call.
+    v2.8.2: Not covered as a default. Pass by_alias=True on each model_dump call.
+    v2.13.5: Set ConfigDict(serialize_by_alias=True) on the model.
+  sources:
+    v2.13.5: "Alias"
+
+- id: q022
+  question: >
+    A field is typed as a base model but holds a subclass instance. How do I get
+    the subclass's extra fields in model_dump?
+  category: version_sensitive
+  answers:
+    v2.4.0: >
+      By default only the base class's fields are dumped. Annotate the field as
+      SerializeAsAny[Base] to get duck-typed serialization.
+    v2.8.2: >
+      Use the SerializeAsAny annotation, or pass serialize_as_any=True to
+      model_dump / model_dump_json at runtime.
+    v2.13.5: >
+      Use polymorphic serialization, added in v2.13 as the better alternative:
+      set polymorphic_serialization in the config, or pass it at runtime to the
+      serialization methods. SerializeAsAny and serialize_as_any still exist.
+  sources:
+    v2.4.0: "Serialization > Serializing subclasses > Serializing with duck-typing"
+    v2.13.5: "Serialization > Serializing subclasses > Polymorphic serialization"
+
+- id: q023
+  question: >
+    My union members don't share a common field to discriminate on. Can I use a
+    function to pick the right model?
+  category: version_sensitive
+  answers:
+    v2.4.0: >
+      Not covered. Discriminated unions are documented only with a field name,
+      e.g. Field(discriminator='pet_type').
+    v2.8.2: >
+      Yes. Use Discriminator with a callable, and mark each union member with a
+      Tag. The callable should handle both dict and model inputs.
+    v2.13.5: Same as v2.8.2.
+  sources:
+    v2.8.2: "Unions > Discriminated Unions with callable `Discriminator`"
+    v2.13.5: "Unions > Discriminated Unions with callable `Discriminator`"
+
+- id: q024
+  question: How do I set Pydantic config like strict=True on a TypedDict or a standard library dataclass?
+  category: version_sensitive
+  answers:
+    v2.4.0: Set a __pydantic_config__ = ConfigDict(...) class attribute.
+    v2.8.2: >
+      Set a __pydantic_config__ class attribute, or use the @with_config
+      decorator, which keeps static type checkers happy.
+    v2.13.5: Same as v2.8.2.
+  sources:
+    v2.13.5: "Config > Configuration on other supported types"
+
+- id: q025
+  question: Can I use Python 3.12's `type` statement to define a reusable type alias for Pydantic fields?
+  category: version_sensitive
+  answers:
+    v2.4.0: >
+      Not covered. Named aliases are documented only via TypeAliasType from
+      typing_extensions.
+    v2.8.2: Same as v2.4.0.
+    v2.13.5: >
+      Yes. Named type aliases are fully supported since v2.11, via the type
+      statement (PEP 695) or TypeAliasType on older Pythons. Unlike implicit
+      aliases, they get a JSON schema definition and support recursion.
+  sources:
+    all: "Types > Named type aliases"
+
+# ───────────────────────────────── new_feature ───────────────────────────────
+
+- id: q003
+  question: How do I use the experimental pipeline API?
+  category: new_feature
+  answers:
+    v2.4.0: Not covered. The pipeline API doesn't exist in this version's docs.
+    v2.8.2: >
+      Import from pydantic.experimental.pipeline (e.g. validate_as, transform) to
+      compose parsing, constraints, and transformations. Introduced in v2.8.0.
+    v2.13.5: Same as v2.8.2.
+  sources:
+    v2.8.2: "Experimental > Pipeline API"
+    v2.13.5: "Experimental > Experimental Features > Pipeline API"
+
+- id: q004
+  question: How do I validate partial or incomplete JSON?
+  category: new_feature
+  answers:
+    v2.4.0: Not covered.
+    v2.8.2: Not covered.
+    v2.13.5: >
+      Pass experimental_allow_partial=True to validate_json / validate_python.
+      Experimental; added in v2.10.
+  sources:
+    v2.13.5: "Experimental > Experimental Features > Partial validation"
+
+- id: q005
+  question: What is the MISSING sentinel and when do I use it?
+  category: new_feature
+  answers:
+    v2.4.0: Not covered.
+    v2.8.2: Not covered.
+    v2.13.5: >
+      An experimental singleton meaning a field value wasn't provided. Use it as
+      a default instead of None when None has its own meaning; fields set to
+      MISSING are excluded from serialization output.
+  sources:
+    v2.13.5: "Experimental > Experimental Features > `MISSING` sentinel"
+
+- id: q008
+  question: How do I mark a field as deprecated in a Pydantic model?
+  category: new_feature
+  answers:
+    v2.4.0: Not covered. This version's docs don't describe deprecating fields.
+    v2.8.2: >
+      Use Field(deprecated=...) with a string (used as the message), a
+      warnings.deprecated instance, or True. Accessing the field emits a
+      deprecation warning and the JSON schema marks it deprecated.
+    v2.13.5: Same as v2.8.2.
+  sources:
+    v2.8.2: "Fields > Deprecated fields"
+    v2.13.5: "Fields > Deprecated fields"
+  notes: version-added v2.7.0
+
+- id: q012
+  question: Can I add a private attribute to a model built with create_model?
+  category: new_feature
+  answers:
+    v2.4.0: Not covered.
+    v2.8.2: Not covered.
+    v2.13.5: >
+      Yes. Pass a tuple of (type, PrivateAttr(...)), e.g.
+      _private=(int, PrivateAttr(default=1)).
+  sources:
+    v2.13.5: "Models > Dynamic model creation"
+  notes: Evidence is inside a code example only; expect this to be hard to retrieve.
+
+- id: q026
+  question: Can a default_factory use the value of another field on the same model?
+  category: new_feature
+  answers:
+    v2.4.0: Not covered. default_factory takes no arguments.
+    v2.8.2: Not covered. default_factory takes no arguments.
+    v2.13.5: >
+      Yes. A default_factory can take one argument, a dict of already-validated
+      data. Only fields defined earlier on the model are available. Added in v2.10.
+  sources:
+    v2.13.5: "Fields > Default values"
+
+- id: q027
+  question: How do I make validation of a long list stop at the first invalid item?
+  category: new_feature
+  answers:
+    v2.4.0: Not covered.
+    v2.8.2: >
+      Annotate the sequence with FailFast(), e.g. Annotated[list[bool], FailFast()].
+      You won't get errors for the remaining items, trading visibility for speed.
+    v2.13.5: Same as v2.8.2.
+  sources:
+    v2.8.2: "Performance > Performance tips > Failing early with `FailFast`"
+    v2.13.5: "Performance > Performance tips > Failing early with `FailFast`"
+
+- id: q028
+  question: Can I generate JSON schema titles programmatically instead of setting each one?
+  category: new_feature
+  answers:
+    v2.4.0: Not covered.
+    v2.8.2: >
+      Yes. A field_title_generator function sets a field's title from its name
+      and info; model_title_generator does the same for model titles.
+    v2.13.5: Same as v2.8.2.
+  sources:
+    v2.13.5: "Json Schema > Customizing JSON Schema > Using `field_title_generator`"
+
+- id: q029
+  question: Can I conditionally exclude a computed field from model_dump?
+  category: new_feature
+  answers:
+    v2.4.0: Not covered.
+    v2.8.2: Not covered.
+    v2.13.5: Yes. Pass exclude_if to the @computed_field decorator. Added in v2.13.
+  sources:
+    v2.13.5: "Fields > The `computed_field` decorator"
+
+# ─────────────────────────────────── removed ─────────────────────────────────
+
+- id: q006
+  question: How do I write a Pydantic plugin?
+  category: removed
+  answers:
+    v2.4.0: Documented on the plugins page (marked experimental).
+    v2.8.2: Documented on the plugins page (marked experimental).
+    v2.13.5: Not covered. The plugins page was removed.
+  sources:
+    v2.4.0: "Plugins > Build a plugin"
+    v2.8.2: "Plugins > Build a plugin"
+
+- id: q016
+  question: How do I turn off Pydantic plugins without uninstalling them?
+  category: removed
+  answers:
+    v2.4.0: Not covered. The plugins docs don't describe disabling plugins.
+    v2.8.2: >
+      Set PYDANTIC_DISABLE_PLUGINS: __all__, 1, or true disables all plugins;
+      a comma-separated list disables specific ones.
+    v2.13.5: Not covered. The plugins page was removed.
+  sources:
+    v2.8.2: "Plugins > Disabling Plugins"
+  notes: Middle-version only.
+
+- id: q017
+  question: Importing from pydantic.experimental gives me a warning. How do I silence it?
+  category: removed
+  answers:
+    v2.4.0: Not covered. The experimental module isn't documented.
+    v2.8.2: >
+      warnings.filterwarnings('ignore', category=PydanticExperimentalWarning).
+    v2.13.5: Not covered. The docs no longer describe an import warning.
+  sources:
+    v2.8.2: "Experimental > Warnings on Import"
+  notes: Middle-version only.
+
+- id: q030
+  question: How do I dump a Json[...] field back as its raw JSON string instead of the parsed value?
+  category: removed
+  answers:
+    v2.4.0: Use model_dump(round_trip=True); Json fields are then dumped as strings.
+    v2.8.2: Use model_dump(round_trip=True); Json fields are then dumped as strings.
+    v2.13.5: Not covered in the docs.
+  sources:
+    v2.4.0: "Serialization > `model.model_dump(...)`"
+    v2.8.2: "Serialization > `model.model_dump(...)`"
+  notes: >
+    Evidence is a code example only. The feature still exists in Pydantic; the
+    docs stopped showing it, and the golden set grades against the docs.
+
+# ──────────────────────────────── version_stable ─────────────────────────────
+
+- id: q010
+  question: In create_model, can I define a field with a (type, Field(...)) tuple instead of Annotated?
+  category: version_stable
+  answers:
+    v2.4.0: Yes. Fields are tuples of (type, default value).
+    v2.8.2: Yes. (type, Field(...)) is a documented form, equivalent to Annotated[type, Field(...)].
+    v2.13.5: Yes. A two-tuple of (type, default or Field()) is one of the two supported forms.
+  sources:
+    all: "Models > Dynamic model creation"
+  notes: v2.4.0 never shows Field() as the tuple default explicitly.
+
+- id: q013
+  question: Is there a tool that can automatically convert my Pydantic v1 code to v2?
+  category: version_stable
+  answers:
+    all: >
+      Yes, bump-pydantic (beta). pip install bump-pydantic, then run
+      bump-pydantic <your_package> from the repo root.
+  sources:
+    all: "Migration > Code transformation tool"
+
+- id: q014
+  question: Where did BaseSettings go? I can't import it from pydantic anymore.
+  category: version_stable
+  answers:
+    all: >
+      It moved to the separate pydantic-settings package. The parse_env_var
+      classmethod was removed; customize settings sources instead.
+  sources:
+    all: "Migration > Migration guide > `BaseSettings` has moved to `pydantic-settings`"
+
+- id: q015
+  question: Why am I getting an error that the JSON schema generator was already used?
+  category: version_stable
+  answers:
+    all: A GenerateJsonSchema instance generates one schema. Create a new instance for each.
+  sources:
+    all: "Usage Errors > JSON schema already used"
+
+- id: q018
+  question: How do I get Pydantic validation on a regular Python dataclass?
+  category: version_stable
+  answers:
+    all: >
+      Use @dataclass from pydantic.dataclasses instead of the standard library
+      one. Fields are validated and coerced on construction. It is not a full
+      replacement for BaseModel.
+  sources:
+    all: "Dataclasses"
+
+- id: q019
+  question: What happens if I declare a field on a Pydantic model without a type annotation?
+  category: version_stable
+  answers:
+    all: >
+      PydanticUserError, code 'model-field-missing-annotation'. If it isn't meant
+      to be a field, annotate it as ClassVar or add its type to
+      model_config['ignored_types'].
+  sources:
+    all: "Usage Errors > Model field missing annotation"
+
+- id: q031
+  question: If I use an alias_generator and also set an explicit alias on a field, which wins?
+  category: version_stable
+  answers:
+    all: >
+      The explicit Field alias wins by default. alias_priority=2 keeps it;
+      alias_priority=1 lets the generator override it. The same applies to
+      validation_alias and serialization_alias.
+  sources:
+    all: "Alias > Alias Precedence"
+
+- id: q032
+  question: How do I hide a field from a model's printed representation?
+  category: version_stable
+  answers:
+    all: Use Field(repr=False). The default is repr=True.
+  sources:
+    all: "Fields > Field Representation"
+
+- id: q033
+  question: Can a Pydantic model also be an abstract base class?
+  category: version_stable
+  answers:
+    all: Yes. Subclass both BaseModel and abc.ABC, and use @abc.abstractmethod.
+  sources:
+    all: "Models > Abstract base classes"
+
+- id: q034
+  question: What happens if a model defines both class Config and model_config?
+  category: version_stable
+  answers:
+    all: PydanticUserError, code 'config-both'. Use only one.
+  sources:
+    all: "Usage Errors > `Config` and `model_config` both defined"
+
+- id: q035
+  question: Why do I get an error when I call BaseModel() directly?
+  category: version_stable
+  answers:
+    all: >
+      Instantiating BaseModel itself raises PydanticUserError, code
+      'base-model-instantiated'. Define a model that inherits from BaseModel.
+  sources:
+    all: "Usage Errors > BaseModel instantiated"
+
+- id: q036
+  question: Can I define two field_serializer functions for the same field?
+  category: version_stable
+  answers:
+    all: No. It raises PydanticUserError, code 'multiple-field-serializers'.
+  sources:
+    all: "Usage Errors > Multiple field serializers"
+
+- id: q037
+  question: What happens if a field_validator names a field that doesn't exist on the model?
+  category: version_stable
+  answers:
+    all: PydanticUserError, code 'decorator-missing-field'.
+  sources:
+    all: "Usage Errors > Decorator on missing field"
+
+- id: q038
+  question: What validation error do I get if I pass 0.5 to an int field?
+  category: version_stable
+  answers:
+    all: A ValidationError with type 'int_from_float'.
+  sources:
+    all: "Validation Errors > `int_from_float`"
+
+- id: q039
+  question: How do I make a model reject unexpected extra keys, and what error do I get?
+  category: version_stable
+  answers:
+    all: Set ConfigDict(extra='forbid'). Extra keys raise a ValidationError of type 'extra_forbidden'.
+  sources:
+    all: "Validation Errors > `extra_forbidden`"
+
+- id: q040
+  question: What happens if I pass a timezone-aware datetime to a NaiveDatetime field?
+  category: version_stable
+  answers:
+    all: A ValidationError of type 'timezone_naive'.
+  sources:
+    all: "Validation Errors > `timezone_naive`"

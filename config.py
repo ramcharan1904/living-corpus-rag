@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parent
@@ -34,7 +35,10 @@ class Settings(BaseSettings):
     # API
     api_host: str = "0.0.0.0"
     api_port: int = 8000
-     
+
+    # OpenAI (Gold layer embeddings)
+    openai_api_key: SecretStr = SecretStr("")
+
     excluded_top_level: set[str] = {
         "contributing.md",
         "pydantic_people.md",

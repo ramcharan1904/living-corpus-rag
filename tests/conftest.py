@@ -79,3 +79,19 @@ def test_version(pg_conn, tmp_path):
         yield TEST_VERSION_TAG
     finally:
         _cleanup(pg_conn)
+
+
+@pytest.fixture
+def embed_fixture_doc(pg_conn, test_version):
+    """A throwaway `documents` row to hang test chunks off of.
+
+    Yields (doc_id, version_rank). No separate cleanup needed: test_version's
+    teardown already deletes documents matching the fixture marker, which
+    cascades to any chunks inserted against this doc_id.
+    """
+    with pg_conn.transaction():
+        row = pg_conn.execute(
+            "INSERT INTO documents (library, rel_path) VALUES (%s, %s) RETURNING doc_id",
+            ("pydantic", f"{FIXTURE_MARKER}/embed.md"),
+        ).fetchone()
+    yield row[0], TEST_VERSION_RANK
