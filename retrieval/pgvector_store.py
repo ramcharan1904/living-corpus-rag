@@ -25,6 +25,8 @@ docstrings for the exact contract this file's calling code depends on.
 import re
 from dataclasses import replace
 
+import numpy as np
+
 import psycopg
 from openai import OpenAI
 from pgvector.psycopg import register_vector
@@ -152,9 +154,9 @@ class PgVectorRetriever:
             return self._hybrid(query, target_version_rank, top_k)
         raise ValueError(f"unknown mode: {mode!r}")
 
-    def _embed_query(self, query: str) -> list[float]:
+    def _embed_query(self, query: str) -> np.ndarray:
         response = self.client.embeddings.create(model=EMBED_MODEL, input=[query], dimensions=EMBED_DIMENSIONS)
-        return response.data[0].embedding
+        return np.array(response.data[0].embedding)
 
     def _dense(self, query: str, target_version_rank: int, top_k: int) -> list[RetrievedChunk]:
         qvec = self._embed_query(query)
