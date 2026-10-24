@@ -95,3 +95,24 @@ def embed_fixture_doc(pg_conn, test_version):
             ("pydantic", f"{FIXTURE_MARKER}/embed.md"),
         ).fetchone()
     yield row[0], TEST_VERSION_RANK
+
+
+@pytest.fixture
+def version_filter_doc(pg_conn):
+    """A throwaway `documents` row for version_filter_sql tests.
+
+    Unlike embed_fixture_doc, this doesn't use test_version/rank 999: these
+    tests exercise the real, permanently-seeded ranks 1/2/3, since that's
+    what the version rule actually filters against. Cleanup is still safe -
+    _cleanup() only ever touches the throwaway rank 999, never 1/2/3.
+    """
+    _cleanup(pg_conn)
+    with pg_conn.transaction():
+        row = pg_conn.execute(
+            "INSERT INTO documents (library, rel_path) VALUES (%s, %s) RETURNING doc_id",
+            ("pydantic", f"{FIXTURE_MARKER}/version_filter.md"),
+        ).fetchone()
+    try:
+        yield row[0]
+    finally:
+        _cleanup(pg_conn)
