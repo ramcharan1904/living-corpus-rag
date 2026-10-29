@@ -154,8 +154,8 @@ questions:
       Tag. The callable should handle both dict and model inputs.
     v2.13.5: Same as v2.8.2.
   sources:
-    v2.8.2: "Unions > Discriminated Unions with callable `Discriminator`"
-    v2.13.5: "Unions > Discriminated Unions with callable `Discriminator`"
+    v2.8.2: "Unions > Discriminated Unions > Discriminated Unions with callable `Discriminator`"
+    v2.13.5: "Unions > Discriminated unions > Discriminated Unions with callable `Discriminator`"
 
 - id: q024
   question: How do I set Pydantic config like strict=True on a TypedDict or a standard library dataclass?
@@ -182,7 +182,7 @@ questions:
       statement (PEP 695) or TypeAliasType on older Pythons. Unlike implicit
       aliases, they get a JSON schema definition and support recursion.
   sources:
-    all: "Types > Named type aliases"
+    all: "Types > Custom Types > Named type aliases"
 
 # ───────────────────────────────── new_feature ───────────────────────────────
 
@@ -196,7 +196,7 @@ questions:
       compose parsing, constraints, and transformations. Introduced in v2.8.0.
     v2.13.5: Same as v2.8.2.
   sources:
-    v2.8.2: "Experimental > Pipeline API"
+    v2.8.2: "Experimental > Experimental Features > Pipeline API"
     v2.13.5: "Experimental > Experimental Features > Pipeline API"
 
 - id: q004
@@ -209,7 +209,7 @@ questions:
       Pass experimental_allow_partial=True to validate_json / validate_python.
       Experimental; added in v2.10.
   sources:
-    v2.13.5: "Experimental > Experimental Features > Partial validation"
+    v2.13.5: "Experimental > Experimental Features > Partial Validation"
 
 - id: q005
   question: What is the MISSING sentinel and when do I use it?
@@ -334,7 +334,7 @@ questions:
       warnings.filterwarnings('ignore', category=PydanticExperimentalWarning).
     v2.13.5: Not covered. The docs no longer describe an import warning.
   sources:
-    v2.8.2: "Experimental > Warnings on Import"
+    v2.8.2: "Experimental > Experimental Features > Warnings on Import"
   notes: Middle-version only.
 
 - id: q030

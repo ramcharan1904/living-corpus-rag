@@ -23,6 +23,13 @@ _md = MarkdownIt()
 # Pure markup noise: it bloats the citation and the identity key alike.
 _HTML_TAG = re.compile(r"<[^>]+>")
 
+# MkDocs attr_list anchors - a different syntax, same purpose, e.g.
+#   ### BaseModel instantiated {#base-model-instantiated}
+# "Usage Errors" and "Validation Errors" pages use these throughout, so
+# without stripping them, heading_path carries an id that's redundant with
+# the title right next to it and breaks any exact-string match against it.
+_ANCHOR_ID = re.compile(r"\{#[^}]*\}")
+
 
 @dataclass
 class Chunk:
@@ -89,9 +96,12 @@ def _build_path(stack: list[tuple[int, str]], level: int, title: str, doc_title:
     """Update the heading stack in place and return the full path.
 
     Inline markdown (backticks) is kept: it signals that a heading names a
-    code identifier. Raw HTML tags are stripped — they carry no such signal.
+    code identifier. Raw HTML tags and MkDocs {#...} anchors are stripped —
+    neither carries that signal, both are just markup.
     """
-    title = _HTML_TAG.sub("", title).strip()
+    title = _HTML_TAG.sub("", title)
+    title = _ANCHOR_ID.sub("", title)
+    title = title.strip()
 
     while stack and stack[-1][0] >= level:
         stack.pop()
