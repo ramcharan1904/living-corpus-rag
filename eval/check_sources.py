@@ -21,6 +21,7 @@ import psycopg
 import yaml
 
 from config import REPO_ROOT, settings
+from eval.matching import is_hit
 from retrieval.pgvector_store import version_filter_sql
 
 QUESTIONS_PATH = REPO_ROOT / "eval" / "golden" / "questions.yaml"
@@ -57,14 +58,6 @@ def heading_paths_at_rank(conn: psycopg.Connection, rank: int) -> list[str]:
     return [r[0] for r in rows]
 
 
-def source_matches(source: str, heading_path: str) -> bool:
-    return (
-        heading_path == source
-        or heading_path.startswith(source + " > ")
-        or heading_path.startswith(source + " (part ")
-    )
-
-
 def check_all(conn: psycopg.Connection) -> list[dict]:
     version_ranks = get_version_ranks(conn)
     questions = load_questions()
@@ -80,7 +73,7 @@ def check_all(conn: psycopg.Connection) -> list[dict]:
         for tag, source in expand_sources(sources).items():
             rank = version_ranks[tag]
             candidates = paths_by_rank[rank]
-            if any(source_matches(source, hp) for hp in candidates):
+            if is_hit(candidates, source):
                 continue
             mismatches.append(
                 {
