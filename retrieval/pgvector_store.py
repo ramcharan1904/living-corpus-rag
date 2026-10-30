@@ -15,6 +15,15 @@ keyword: NOT websearch_to_tsquery/plainto_tsquery - golden questions are full
     phraseto_tsquery() sub-expressions, not string concatenation - each
     function does the part it's actually good at.
 
+    Matching and ranking are split. The @@ match condition is any phrase OR
+    any word - unchanged. But ts_rank_cd scores an OR'd tsquery by how
+    densely ANY of its lexemes appear, with no idea which disjunct a given
+    match came from - so a chunk repeating a common word like "model" many
+    times outranks a chunk that hits a specific identifier phrase like
+    create <-> model once, even though the phrase is the better signal.
+    PHRASE_WEIGHT fixes this by scoring the phrase and word parts with two
+    separate ts_rank_cd calls and weighting the phrase one higher.
+
 hybrid: dense and keyword each run over a larger candidate pool
     (HYBRID_CANDIDATE_POOL), then fused with RRF.
 
@@ -37,6 +46,10 @@ from retrieval.base import RetrievedChunk
 EMBED_MODEL = "text-embedding-3-small"
 EMBED_DIMENSIONS = 1536
 HYBRID_CANDIDATE_POOL = 50
+
+# How much more a phrase match (an identifier-like token, e.g.
+# create_model) counts than a plain word match, in keyword ranking.
+PHRASE_WEIGHT = 3
 
 # 'simple' doesn't strip these, unlike 'english'. Without removing them, a
 # question like "How do I configure..." ORs in "how"/"do"/"i" as if they
@@ -88,17 +101,21 @@ def rrf(rankings: list[list[int]], k: int = 60) -> list[tuple[int, float]]:
             scores[chunk_id] = scores.get(chunk_id, 0) + 1 / (k + rank)
     return sorted(scores.items(), key=lambda item: item[1], reverse=True)
 
-def build_keyword_tsquery(query: str) -> tuple[str, dict[str, str]]:
-    """Build a 'simple'-config tsquery SQL expression for a natural-language query.
+def build_keyword_tsquery(query: str) -> tuple[str | None, str, dict[str, str]]:
+    """Build 'simple'-config tsquery SQL expressions for a natural-language
+    query, split into a phrase part and a word part so they can be ranked
+    with different weights (see PHRASE_WEIGHT and _keyword below).
 
-    Returns (sql_expression, params): sql_expression is a SQL fragment of
-    type tsquery (safe to splice into a larger query, e.g. inside
-    `text_search @@ (...)`), and params are the named values it needs bound.
-
-    OR across the query's significant words (after dropping STOPWORDS),
-    each as its own to_tsquery('simple', word) term, plus a
-    phraseto_tsquery('simple', token) term for each identifier-like token
-    (containing '_' or '()').
+    Returns (phrase_sql, word_sql, params):
+      phrase_sql - OR of phraseto_tsquery('simple', token) for each
+        identifier-like token (containing '_' or '()'). None if the query
+        has no such token - there is then nothing to weight higher.
+      word_sql - OR of to_tsquery('simple', word) for each significant
+        word (after dropping STOPWORDS). Never empty: if there are no
+        plain words at all (every word was a stopword, or the query is
+        only an identifier), falls back to the query's first word, so the
+        score formula's unconditional word-query term is always valid.
+      params - the named values both SQL fragments need bound.
     """
     identifier_tokens = [t.strip("()") for t in _IDENTIFIER_LIKE.findall(query)]
     identifier_lower = {t.lower() for t in identifier_tokens}
@@ -108,27 +125,29 @@ def build_keyword_tsquery(query: str) -> tuple[str, dict[str, str]]:
         if w not in STOPWORDS and w not in identifier_lower
     ]
 
-    terms_sql: list[str] = []
     params: dict[str, str] = {}
 
+    word_terms: list[str] = []
     for i, word in enumerate(plain_words):
         key = f"kw_word_{i}"
-        terms_sql.append(f"to_tsquery('simple', %({key})s)")
+        word_terms.append(f"to_tsquery('simple', %({key})s)")
         params[key] = word
 
+    phrase_terms: list[str] = []
     for i, token in enumerate(identifier_tokens):
         key = f"kw_ident_{i}"
-        terms_sql.append(f"phraseto_tsquery('simple', %({key})s)")
+        phrase_terms.append(f"phraseto_tsquery('simple', %({key})s)")
         params[key] = token
 
-    if not terms_sql:
-        # Every word was a stopword (e.g. "What is it?") - fall back to the
-        # raw query so this never produces an empty/invalid tsquery.
+    if not word_terms:
         fallback = (_WORD.findall(query.lower()) or ["simple"])[0]
-        terms_sql.append("to_tsquery('simple', %(kw_fallback)s)")
+        word_terms.append("to_tsquery('simple', %(kw_fallback)s)")
         params["kw_fallback"] = fallback
 
-    return " || ".join(terms_sql), params
+    phrase_sql = " || ".join(phrase_terms) if phrase_terms else None
+    word_sql = " || ".join(word_terms)
+
+    return phrase_sql, word_sql, params
 
 
 class PgVectorRetriever:
@@ -178,18 +197,33 @@ class PgVectorRetriever:
         return [self._row_to_chunk(r) for r in rows]
 
     def _keyword(self, query: str, target_version_rank: int, top_k: int) -> list[RetrievedChunk]:
-        tsquery_sql, kw_params = build_keyword_tsquery(query)
+        phrase_sql, word_sql, kw_params = build_keyword_tsquery(query)
         version_sql = version_filter_sql()
         params = {**kw_params, "target_rank": target_version_rank, "top_k": top_k}
+
+        # Match condition is unchanged either way: any phrase OR any word.
+        # Only the ranking splits - a weighted phrase score plus a word
+        # score, instead of one ts_rank_cd call that can't tell which
+        # disjunct actually matched.
+        if phrase_sql:
+            match_sql = f"(({phrase_sql}) || ({word_sql}))"
+            score_sql = (
+                f"({PHRASE_WEIGHT} * ts_rank_cd(c.text_search, ({phrase_sql})) "
+                f"+ ts_rank_cd(c.text_search, ({word_sql})))"
+            )
+        else:
+            match_sql = f"({word_sql})"
+            score_sql = f"ts_rank_cd(c.text_search, ({word_sql}))"
+
         with self.conn.transaction():
             rows = self.conn.execute(
                 f"""
                 SELECT c.chunk_id, c.doc_id, d.rel_path, c.heading_path, c.raw_text,
                        c.valid_from_rank, c.valid_to_rank,
-                       ts_rank_cd(c.text_search, ({tsquery_sql})) AS score
+                       {score_sql} AS score
                 FROM chunks c
                 JOIN documents d ON d.doc_id = c.doc_id
-                WHERE c.text_search @@ ({tsquery_sql}) AND ({version_sql})
+                WHERE c.text_search @@ {match_sql} AND ({version_sql})
                 ORDER BY score DESC
                 LIMIT %(top_k)s
                 """,

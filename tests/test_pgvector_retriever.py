@@ -20,7 +20,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from pgvector.psycopg import register_vector
-from retrieval.pgvector_store import PgVectorRetriever
+from retrieval.pgvector_store import PgVectorRetriever, build_keyword_tsquery
 from tests.conftest import FIXTURE_MARKER
 
 FIXTURE_WORD = "zzqfixtureword"
@@ -117,3 +117,27 @@ def test_hybrid_retrieval_fuses_dense_and_keyword(pg_conn, ab_chunks):
 
     assert results[0].chunk_id == chunk_b
     assert results[0].score == pytest.approx(2 / 61, rel=1e-6)
+
+
+def test_keyword_score_unweighted_when_no_identifiers(pg_conn, ab_chunks):
+    """FIXTURE_WORD has no identifier-like token, so build_keyword_tsquery
+    returns phrase_sql=None. PHRASE_WEIGHT must then contribute nothing -
+    the returned score has to be exactly ts_rank_cd(text_search, word_sql),
+    the same single-term score the old, unweighted implementation produced."""
+    _chunk_a, chunk_b = ab_chunks
+
+    phrase_sql, word_sql, params = build_keyword_tsquery(FIXTURE_WORD)
+    assert phrase_sql is None  # sanity: this query really has no identifiers
+
+    client = _fake_embedding_client(ONE_HOT)
+    retriever = PgVectorRetriever(pg_conn, openai_client=client)
+    results = retriever.retrieve(FIXTURE_WORD, target_version_rank=3, top_k=5, mode="keyword")
+    assert results[0].chunk_id == chunk_b
+
+    with pg_conn.transaction():
+        expected_score = pg_conn.execute(
+            f"SELECT ts_rank_cd(text_search, ({word_sql})) FROM chunks WHERE chunk_id = %(chunk_id)s",
+            {**params, "chunk_id": chunk_b},
+        ).fetchone()[0]
+
+    assert results[0].score == pytest.approx(expected_score)
