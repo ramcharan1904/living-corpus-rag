@@ -2,11 +2,12 @@
 compare version-aware retrieval (target_version_rank = that version) against
 baseline (target_version_rank = 3, the newest) across all three modes.
 
-Query embeddings are cached by (model, input, dimensions) - in practice, by
-question text, since dimensions/model never vary within a run. Dense's call
-and hybrid's internal dense call, and the aware/baseline variants of either,
-all embed the identical question text, so each question costs at most one
-real embedding call for the whole run, not one per mode x variant.
+Query embeddings are cached by (model, dimensions, question text) and
+persisted to eval/cache/embeddings.json, so a rerun - even in a fresh
+process - makes zero embedding API calls for any question already seen. Within a single
+run this also means each question costs at most one real embedding call
+total: dense's call and hybrid's internal dense call, and the aware and
+baseline variants of either, all embed the identical question text.
 
 Usage:
     python -m eval.retrieval_eval
@@ -16,6 +17,7 @@ import argparse
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import psycopg
 import yaml
@@ -51,23 +53,55 @@ def expand_sources(sources: dict) -> dict[str, str]:
     return dict(sources)
 
 
-class _CachingEmbeddings:
-    """Wraps a real embeddings client so the same (model, input,
-    dimensions) request is never sent twice in one run."""
+CACHE_DIR = REPO_ROOT / "eval" / "cache"
+CACHE_PATH = CACHE_DIR / "embeddings.json"
 
-    def __init__(self, real_embeddings):
+
+class _CachingEmbeddings:
+    """Wraps a real embeddings client with a cache keyed by (model,
+    dimensions, question text), persisted to disk - so a rerun of the
+    eval, even in a fresh process, makes zero embedding API calls for any
+    question it's already seen at that model/dimensions combination.
+
+    Only caches the single-text call shape _embed_query actually makes
+    (input=[query]). A multi-text batch call would need a different key
+    scheme and isn't something this codebase sends, so it's passed through
+    to the real client uncached rather than guessed at.
+    """
+
+    def __init__(self, real_embeddings, cache_path: Path = CACHE_PATH):
         self._real = real_embeddings
-        self._cache: dict[tuple, object] = {}
+        self._cache_path = cache_path
+        self._cache: dict[tuple[str, int, str], list[float]] = self._load()
         self.call_count = 0
 
+    def _load(self) -> dict[tuple[str, int, str], list[float]]:
+        if not self._cache_path.exists():
+            return {}
+        records = json.loads(self._cache_path.read_text())
+        return {(r["model"], r["dimensions"], r["text"]): r["embedding"] for r in records}
+
+    def _save(self) -> None:
+        self._cache_path.parent.mkdir(parents=True, exist_ok=True)
+        records = [
+            {"model": model, "dimensions": dimensions, "text": text, "embedding": emb}
+            for (model, dimensions, text), emb in self._cache.items()
+        ]
+        self._cache_path.write_text(json.dumps(records))
+
     def create(self, model, input, dimensions):
-        key = (model, tuple(input), dimensions)
-        cached = self._cache.get(key)
-        if cached is not None:
-            return cached
+        if len(input) == 1:
+            key = (model, dimensions, input[0])
+            if key in self._cache:
+                return SimpleNamespace(data=[SimpleNamespace(embedding=self._cache[key])])
+
         self.call_count += 1
         response = self._real.create(model=model, input=input, dimensions=dimensions)
-        self._cache[key] = response
+
+        if len(input) == 1:
+            self._cache[(model, dimensions, input[0])] = list(response.data[0].embedding)
+            self._save()  # written after every new entry, not just at the end - a crash mid-run keeps what's already been fetched
+
         return response
 
 
